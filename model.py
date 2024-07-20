@@ -1,16 +1,18 @@
 import os
 import pickle
 from zipfile import ZipFile
-from datetime import datetime
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from updater import download_binance_monthly_data, download_binance_daily_data
-from config import data_base_path, model_file_path
+from datetime import datetime, timedelta
+import numpy as np
+import torch
+from chronos import ChronosPipeline
+from updater import download_binance_minute_data
+from config import data_base_path
+import random
 
+forecast_price = {}
 
 binance_data_path = os.path.join(data_base_path, "binance/futures-klines")
-training_price_data_path = os.path.join(data_base_path, "eth_price_data.csv")
 
 def download_data(token):
     cm_or_um = "um"
@@ -79,6 +81,10 @@ def train_model(token):
     # Convert 'date' to datetime
     price_data["date"] = pd.to_datetime(price_data["date"])
 
+    # Calculate the mean price
+    # price_data["price"] = price_data[["open", "close", "high", "low"]].mean(axis=1)
+    # price_data["price"] = price_data[["close"]].astype(float)
+
     # Set the date column as the index for resampling
     price_data.set_index("date", inplace=True)
 
@@ -89,15 +95,31 @@ def train_model(token):
     df.reset_index(inplace=True)
     df["date"] = df["date"].map(pd.Timestamp.timestamp)
 
+    # df["date"] = pd.to_datetime(price_data["date"])
     df["price"] = df[["close"]].astype(float)
 
-    # Remove Chronos and Torch code
-    min_price = df["price"].min()
-    max_price = df["price"].max()
+    # print(df.head())
 
-    # Chọn ngẫu nhiên một giá trị giữa giá thấp nhất và giá cao nhất
+    context = torch.tensor(df["price"].values)
+    prediction_length = 1 # Dự đoán giá tiếp theo
+
+    # Huấn luyện mô hình Chronos-T5-Tiny 
+    pipeline = ChronosPipeline.from_pretrained("amazon/chronos-t5-tiny", device_map="auto", torch_dtype=torch.bfloat16)
+    forecast = pipeline.predict(context, prediction_length, num_samples=20)
+
+    forecast = np.unique(forecast)
+    print(f"List forecast for {token}: {forecast}")
+
+    # Lấy giá thấp nhất và cao nhất
+    min_price = np.min(forecast)
+    max_price = np.max(forecast)
+
+    # Chọn ngẫu nhiên một giá trị giữa giá thấp nhất và giá cao nhất, để tránh dự đoán giống nhau
     price_predict = random.uniform(min_price, max_price)
     forecast_price[token] = price_predict
+
+    # median = np.median(forecast.numpy(), axis=1)
+    # forecast_price[token] = median[0][-1]
 
     print(f"Forecasted price for {token}: {forecast_price[token]}")
 
