@@ -1,4 +1,5 @@
 # model.py
+# model.py
 import os
 import pickle
 from zipfile import ZipFile
@@ -6,7 +7,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
 import random
-from config import data_base_path  # Nhập biến từ config.py
+from config import data_base_path  # Đảm bảo rằng biến này được nhập
 
 forecast_price = {}
 
