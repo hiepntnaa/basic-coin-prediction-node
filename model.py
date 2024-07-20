@@ -1,48 +1,46 @@
 import os
 import pickle
 from zipfile import ZipFile
-from datetime import datetime
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from updater import download_binance_monthly_data, download_binance_daily_data
-from config import data_base_path, model_file_path
+from datetime import datetime, timedelta
+import numpy as np
+import torch
+from chronos import ChronosPipeline
+from updater import download_binance_minute_data
+from config import data_base_path
+import random
 
+forecast_price = {}
 
 binance_data_path = os.path.join(data_base_path, "binance/futures-klines")
-training_price_data_path = os.path.join(data_base_path, "eth_price_data.csv")
 
-
-def download_data():
+def download_data(token):
     cm_or_um = "um"
-    symbols = ["ETHUSDT"]
-    intervals = ["1d"]
-    years = ["2020", "2021", "2022", "2023", "2024"]
-    months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
-    download_path = binance_data_path
-    download_binance_monthly_data(
-        cm_or_um, symbols, intervals, years, months, download_path
-    )
-    print(f"Downloaded monthly data to {download_path}.")
+    symbols = [f"{token.upper()}USDT"]
+    interval = "5m"  # 5 phút
     current_datetime = datetime.now()
     current_year = current_datetime.year
     current_month = current_datetime.month
-    download_binance_daily_data(
-        cm_or_um, symbols, intervals, current_year, current_month, download_path
+    download_path = os.path.join(binance_data_path, token.lower())
+    
+    # Download dữ liệu 5 phút
+    download_binance_minute_data(
+        cm_or_um, symbols, interval, current_year, current_month, download_path
     )
-    print(f"Downloaded daily data to {download_path}.")
+    print(f"Downloaded minute data for {token} to {download_path}.")
 
+def format_data(token):
+    path = os.path.join(binance_data_path, token.lower())
+    files = sorted([x for x in os.listdir(path)])
 
-def format_data():
-    files = sorted([x for x in os.listdir(binance_data_path)])
-
-    # No files to process
+    # Không có file nào để xử lý
     if len(files) == 0:
+        print(f"No data files found for {token}")
         return
 
     price_df = pd.DataFrame()
     for file in files:
-        zip_file_path = os.path.join(binance_data_path, file)
+        zip_file_path = os.path.join(path, file)
 
         if not zip_file_path.endswith(".zip"):
             continue
@@ -69,36 +67,68 @@ def format_data():
         df.index.name = "date"
         price_df = pd.concat([price_df, df])
 
-    price_df.sort_index().to_csv(training_price_data_path)
+    if price_df.empty:
+        print(f"No valid data found for {token}")
+        return
 
+    price_df.sort_index().to_csv(os.path.join(data_base_path, f"{token.lower()}_price_data.csv"))
 
-def train_model():
-    # Load the eth price data
-    price_data = pd.read_csv(training_price_data_path)
+def train_model(token):
+    # Load the token price data
+    price_data = pd.read_csv(os.path.join(data_base_path, f"{token.lower()}_price_data.csv"))
     df = pd.DataFrame()
 
-    # Convert 'date' to a numerical value (timestamp) we can use for regression
-    df["date"] = pd.to_datetime(price_data["date"])
+    # Convert 'date' to datetime
+    price_data["date"] = pd.to_datetime(price_data["date"])
+
+    # Calculate the mean price
+    # price_data["price"] = price_data[["open", "close", "high", "low"]].mean(axis=1)
+    # price_data["price"] = price_data[["close"]].astype(float)
+
+    # Set the date column as the index for resampling
+    price_data.set_index("date", inplace=True)
+
+    # Resample the data to 10-minute frequency and compute the mean price
+    df = price_data.resample('10T').mean()
+
+    # Reset the index to have 'date' as a column again
+    df.reset_index(inplace=True)
     df["date"] = df["date"].map(pd.Timestamp.timestamp)
 
-    df["price"] = price_data[["open", "close", "high", "low"]].mean(axis=1)
+    # df["date"] = pd.to_datetime(price_data["date"])
+    df["price"] = df[["close"]].astype(float)
 
-    # Reshape the data to the shape expected by sklearn
-    x = df["date"].values.reshape(-1, 1)
-    y = df["price"].values.reshape(-1, 1)
+    # print(df.head())
 
-    # Split the data into training set and test set
-    x_train, _, y_train, _ = train_test_split(x, y, test_size=0.2, random_state=0)
+    context = torch.tensor(df["price"].values)
+    prediction_length = 1 # Dự đoán giá tiếp theo
 
-    # Train the model
-    model = LinearRegression()
-    model.fit(x_train, y_train)
+    # Huấn luyện mô hình Chronos-T5-Tiny 
+    pipeline = ChronosPipeline.from_pretrained("amazon/chronos-t5-tiny", device_map="auto", torch_dtype=torch.bfloat16)
+    forecast = pipeline.predict(context, prediction_length, num_samples=20)
 
-    # create the model's parent directory if it doesn't exist
-    os.makedirs(os.path.dirname(model_file_path), exist_ok=True)
+    forecast = np.unique(forecast)
+    print(f"List forecast for {token}: {forecast}")
 
-    # Save the trained model to a file
-    with open(model_file_path, "wb") as f:
-        pickle.dump(model, f)
+    # Lấy giá thấp nhất và cao nhất
+    min_price = np.min(forecast)
+    max_price = np.max(forecast)
 
-    print(f"Trained model saved to {model_file_path}")
+    # Chọn ngẫu nhiên một giá trị giữa giá thấp nhất và giá cao nhất, để tránh dự đoán giống nhau
+    price_predict = random.uniform(min_price, max_price)
+    forecast_price[token] = price_predict
+
+    # median = np.median(forecast.numpy(), axis=1)
+    # forecast_price[token] = median[0][-1]
+
+    print(f"Forecasted price for {token}: {forecast_price[token]}")
+
+def update_data():
+    tokens = ["ETH", "BTC", "SOL"]
+    for token in tokens:
+        download_data(token)
+        format_data(token)
+        train_model(token)
+
+if __name__ == "__main__":
+    update_data()
