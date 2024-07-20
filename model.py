@@ -4,7 +4,6 @@ from zipfile import ZipFile
 import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
-import torch
 from chronos import ChronosPipeline
 from updater import download_binance_minute_data
 from config import data_base_path
@@ -98,10 +97,6 @@ def train_model(token):
     # df["date"] = pd.to_datetime(price_data["date"])
     df["price"] = df[["close"]].astype(float)
 
-    # print(df.head())
-
-    context = torch.tensor(df["price"].values)
-    prediction_length = 1 # Dự đoán giá tiếp theo
 
     # Huấn luyện mô hình Chronos-T5-Tiny 
     pipeline = ChronosPipeline.from_pretrained("amazon/chronos-t5-tiny", device_map="auto", torch_dtype=torch.bfloat16)
