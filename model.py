@@ -1,16 +1,16 @@
-# model.py
 import os
 import pickle
 from zipfile import ZipFile
+from datetime import datetime
 import pandas as pd
-from datetime import datetime, timedelta
-import numpy as np
-import random
-from config import data_base_path  # Import data_base_path from config.py
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from updater import download_binance_monthly_data, download_binance_daily_data
+from config import data_base_path, model_file_path
 
-forecast_price = {}
 
 binance_data_path = os.path.join(data_base_path, "binance/futures-klines")
+training_price_data_path = os.path.join(data_base_path, "eth_price_data.csv")
 
 def download_data(token):
     cm_or_um = "um"
