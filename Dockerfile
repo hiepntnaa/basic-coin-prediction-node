@@ -1,5 +1,5 @@
 # Use an official Python runtime as the base image
-FROM amd64/python:3.9-buster
+FROM amd64/python:3.9-buster as project_env
 
 # Set the working directory in the container
 WORKDIR /app
@@ -9,7 +9,8 @@ COPY requirements.txt requirements.txt
 RUN pip install --upgrade pip setuptools \
     && pip install -r requirements.txt
 
-# Copy the entire project into the container
+FROM project_env
+
 COPY . /app/
 
 # Set the entrypoint command
