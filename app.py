@@ -19,7 +19,7 @@ def get_token_inference(token):
 @app.route("/inference/<string:token>")
 def generate_inference(token):
     """Generate inference for given token."""
-    if not token or token not in ["ETH", "BTC", "SOL"]:
+    if not token or token not in ["ETH", "BTC", "BNB", "SOL", "ARB"]:
         error_msg = "Token is required" if not token else "Token not supported"
         return Response(json.dumps({"error": error_msg}), status=400, mimetype='application/json')
 
